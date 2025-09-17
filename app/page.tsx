@@ -104,8 +104,12 @@ export default function SoundCommPanel() {
       ...l,
     ].slice(0, 200));
 
-    // Play the notification sound
-    soundRef.current.play();
+    // Check if soundRef.current is not null before calling .play()
+    if (soundRef.current) {
+      soundRef.current.play().catch((err) => {
+        console.warn("Audio play blocked:", err);
+      });
+    }
 
     // Trigger browser notification if allowed
     if (Notification.permission === "granted") {
