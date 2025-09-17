@@ -12,11 +12,9 @@ import { io, Socket } from "socket.io-client";
 
 // --- Config ------------------------------------------------------------
 const SOCKET_URL: string =
-  (typeof window !== "undefined" && (window as any).__SOCKET_URL__) ||
-  (typeof process !== "undefined" && (process as any).env?.NEXT_PUBLIC_SOCKET_URL) ||
-  "http://localhost:4000";
-
-// const SOCKET_URL: string = "https://elperetz-soundcomm-production.up.railway.app/";
+  (typeof window !== "undefined" && (window as Window & { __SOCKET_URL__?: string }).__SOCKET_URL__) ||
+  (typeof process !== "undefined" && (process as NodeJS.Process).env?.NEXT_PUBLIC_SOCKET_URL) ||
+  "http://localhost:4000"; // Fallback to localhost in development
 
 const INITIAL_LEVEL = 5; // server will enforce too
 
@@ -86,7 +84,6 @@ export default function SoundCommPanel() {
   const [mySocketId, setMySocketId] = useState<string | null>(null);
 
   // sound 
-  // sound
   const soundRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -119,14 +116,11 @@ export default function SoundCommPanel() {
     }
   };
 
-
   useEffect(() => {
     if (Notification.permission !== "granted") {
       Notification.requestPermission();
     }
   }, []);
-
-
 
   // Session
   const [role, setRole] = useState<"A" | "B">("A");
@@ -174,11 +168,6 @@ export default function SoundCommPanel() {
       s.disconnect();
     };
   }, [room, role]);
-
-  // Local helper to push our own log instantly (nice UX); server broadcast is skipped by senderId check
-  // const pushLocal = (from: "A" | "B", text: string) => {
-  //   setLog((l) => [{ id: crypto.randomUUID(), at: nowTime(), from, text, senderId: mySocketId || undefined }, ...l].slice(0, 200));
-  // };
 
   // Emitters ------------------------------------------------------------
   const emitARequest = (instrumentKey: string, kind: "VLK" | "VLH" | "SOUND_OK", labelForText?: string) => {
@@ -333,7 +322,7 @@ export default function SoundCommPanel() {
         </div>
 
         {/* Right: B Panel */}
-        <div className="rounded-3xl bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl p-5">
+        <div className="rounded-2xl bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl p-5">
           <SectionTitle icon="🎚️">Sound Desk (B) – Actions</SectionTitle>
           <p className="text-white/70 text-sm mt-1">Adjust levels and acknowledge.</p>
 
