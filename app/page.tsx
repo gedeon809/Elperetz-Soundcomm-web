@@ -13,8 +13,8 @@ import { io, Socket } from "socket.io-client";
 // --- Config ------------------------------------------------------------
 const SOCKET_URL: string =
   (typeof window !== "undefined" && (window as Window & { __SOCKET_URL__?: string }).__SOCKET_URL__) ||
-  (typeof process !== "undefined" && (process as NodeJS.Process).env?.NEXT_PUBLIC_SOCKET_URL) ||
-  "https://elperetz-soundcomm-production.up.railway.app/"; // Fallback to localhost in development
+  process.env.NEXT_PUBLIC_SOCKET_URL ||
+  "http://localhost:4000"; // Fallback to localhost in development
 
 const INITIAL_LEVEL = 5; // server will enforce too
 
@@ -91,11 +91,13 @@ export default function SoundCommPanel() {
     soundRef.current = new Audio("/notification.wav");
   }, []);
 
-  if (soundRef.current) {
-    soundRef.current.play().catch((err) => {
-      console.warn("Audio play blocked:", err);
-    });
-  }
+  useEffect(() => {
+    if (soundRef.current) {
+      soundRef.current.play().catch((err) => {
+        console.warn("Audio play blocked:", err);
+      });
+    }
+  }, [soundRef]);
 
   // Local helper to push our own log instantly (nice UX); server broadcast is skipped by senderId check
   const pushLocal = (from: "A" | "B", text: string) => {
