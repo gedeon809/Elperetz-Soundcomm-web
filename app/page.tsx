@@ -116,7 +116,7 @@ export default function SoundCommPanel() {
     if (Notification.permission === "granted") {
       new Notification("New SoundComm Message", {
         body: text,
-        icon: "/icon.png",
+        icon: "/vercel.svg",
       });
     }
   };
