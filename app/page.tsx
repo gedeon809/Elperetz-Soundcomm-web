@@ -82,64 +82,50 @@ export default function SoundCommPanel() {
   const [connected, setConnected] = useState(false);
   const [mySocketId, setMySocketId] = useState<string | null>(null);
 
-// sound 
-const soundRef = useRef<HTMLAudioElement | null>(null);
+ // sound 
+  const soundRef = useRef<HTMLAudioElement | null>(null);
 
-// State to track user interaction
-const [soundAllowed, setSoundAllowed] = useState(false);
+  useEffect(() => {
+    // only runs in browser
+    soundRef.current = new Audio("/notification.wav");
+  }, []);
 
-// Trigger sound play after user interaction
-const handleUserInteraction = () => {
-  if (soundRef.current) {
-    soundRef.current.play().catch((err) => {
-      console.warn("Audio play blocked:", err);
-    });
-  }
-  setSoundAllowed(true);
-};
+  useEffect(() => {
+    if (soundRef.current) {
+      soundRef.current.play().catch((err) => {
+        console.warn("Audio play blocked:", err);
+      });
+    }
+  }, [soundRef]);
+ 
+  // Local helper to push our own log instantly (nice UX); server broadcast is skipped by senderId check
+  const pushLocal = (from: "A" | "B", text: string) => {
+    setLog((l) => [
+      { id: crypto.randomUUID(), at: nowTime(), from, text, senderId: mySocketId || undefined },
+      ...l,
+    ].slice(0, 200));
 
-useEffect(() => {
-  soundRef.current = new Audio("/notification.wav");
-}, []);
+    // Check if soundRef.current is not null before calling .play()
+    if (soundRef.current) {
+      soundRef.current.play().catch((err) => {
+        console.warn("Audio play blocked:", err);
+      });
+    }
 
-useEffect(() => {
-  // Play the sound only after user interaction
-  if (soundAllowed && soundRef.current) {
-    soundRef.current.play().catch((err) => {
-      console.warn("Audio play blocked:", err);
-    });
-  }
-}, [soundAllowed]);
+    // Trigger browser notification if allowed
+    if (Notification.permission === "granted") {
+      new Notification("New SoundComm Message", {
+        body: text,
+        icon: "/vercel.svg",
+      });
+    }
+  };
 
-// Local helper to push our own log instantly (nice UX); server broadcast is skipped by senderId check
-const pushLocal = (from: "A" | "B", text: string) => {
-  setLog((l) => [
-    { id: crypto.randomUUID(), at: nowTime(), from, text, senderId: mySocketId || undefined },
-    ...l,
-  ].slice(0, 200));
-
-  if (soundAllowed && soundRef.current) {
-    soundRef.current.play().catch((err) => {
-      console.warn("Audio play blocked:", err);
-    });
-  }
-
-  // Trigger browser notification if allowed
-  if (Notification.permission === "granted") {
-    new Notification("New SoundComm Message", {
-      body: text,
-      icon: "/vercel.svg",
-    });
-  }
-};
-
-// Request notification permission (for both mobile and desktop)
-useEffect(() => {
-  if (Notification.permission !== "granted") {
-    Notification.requestPermission();
-  }
-}, []);
-
+  useEffect(() => {
+    if (Notification.permission !== "granted") {
+      Notification.requestPermission();
+    }
+  }, []);
 
   // Session
   const [role, setRole] = useState<"A" | "B">("A");
