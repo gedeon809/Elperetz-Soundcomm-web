@@ -14,7 +14,7 @@ import { io, Socket } from "socket.io-client";
 const SOCKET_URL: string =
   (typeof window !== "undefined" && (window as Window & { __SOCKET_URL__?: string }).__SOCKET_URL__) ||
   (typeof process !== "undefined" && (process as NodeJS.Process).env?.NEXT_PUBLIC_SOCKET_URL) ||
-  "http://localhost:4000"; // Fallback to localhost in development
+  "https://elperetz-soundcomm-production.up.railway.app/"; // Fallback to localhost in development
 
 const INITIAL_LEVEL = 5; // server will enforce too
 
