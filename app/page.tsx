@@ -469,15 +469,6 @@ export default function SoundCommPanel() {
                 <PillButton label="Reset Levels (all)" onClick={emitResetLevels} disabled={!connected || role !== "B"} />
               </div>
 
-              {/* Legend (includes translator codes) */}
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-white/80">
-                {legend.map((l) => (
-                  <div key={l.code} className="flex items-center gap-2">
-                    <Badge>{l.code}</Badge>
-                    <span>{l.desc}</span>
-                  </div>
-                ))}
-              </div>
 
               {/* Chat bubbles: M left (indigo), S right (emerald) */}
               <div className="mt-4 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-3 space-y-3">
