@@ -30,13 +30,13 @@ const INSTRUMENTS: {
 
 /** Quick Translator (common M -> S messages) */
 const QUICK_PHRASES: { code: string; text: string; danger?: boolean }[] = [
-  { code: "MSBP", text: "Return speaker not positioned correctly" },
-  { code: "CHM", text: "I can’t hear myself on return speaker" },
-  { code: "CHP", text: "I can’t hear the preacher" },
-  { code: "MLV", text: "My mic volume is low" },
-  { code: "MVH", text: "My mic volume is too high" },
-  { code: "EP",  text: "There is echo" },
-  { code: "BSW", text: "The screen on the balcony is not working" },
+  { code: "MSBP", text: "Return speaker not positioned correctly", danger: true },
+  { code: "CHM", text: "I can’t hear myself on return speaker", danger: true },
+  { code: "CHP", text: "I can’t hear the preacher", danger: true },
+  { code: "MLV", text: "My mic volume is low", danger: true },
+  { code: "MVH", text: "My mic volume is too high", danger: true },
+  { code: "EP",  text: "There is echo", danger: true },
+  { code: "BSW", text: "The screen on the balcony is not working", danger: true },
   { code: "SOS", text: "SECURITY EMERGENCY..", danger: true },
 ];
 
