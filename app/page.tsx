@@ -4,7 +4,7 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
 import { io, Socket } from "socket.io-client";
 
 // SoundComm – Musicians (M) ↔ Sound System (S)
-// UI shows M/S, socket protocol remains A/B under the hood
+// (Socket roles remain A/B under the hood)
 
 // --- Config ------------------------------------------------------------
 const SOCKET_URL: string =
@@ -13,6 +13,7 @@ const SOCKET_URL: string =
 
 const INITIAL_LEVEL = 5;
 
+// Instruments
 const INSTRUMENTS: {
   key: string;
   label: string;
@@ -28,17 +29,23 @@ const INSTRUMENTS: {
   { key: "songleader", label: "Song Leader", aActions: ["VLK", "VLH"], hasBControls: true },
 ];
 
-/** Quick Translator (common M -> S messages) */
+/** Quick Translator (common M → S messages) */
 const QUICK_PHRASES: { code: string; text: string; danger?: boolean }[] = [
   { code: "MSBP", text: "Return speaker not positioned correctly", danger: true },
-  { code: "CHM", text: "I can’t hear myself on return speaker", danger: true },
-  { code: "CHP", text: "I can’t hear the preacher", danger: true },
-  { code: "MLV", text: "My mic volume is low", danger: true },
-  { code: "MVH", text: "My mic volume is too high", danger: true },
-  { code: "EP",  text: "There is echo", danger: true },
-  { code: "BSW", text: "The screen on the balcony is not working", danger: true },
-  { code: "SOS", text: "SECURITY EMERGENCY..", danger: true },
+  { code: "CHM",  text: "I can’t hear myself on return speaker",    danger: true },
+  { code: "CHP",  text: "I can’t hear the preacher",                 danger: true },
+  { code: "MLV",  text: "My mic volume is low",                      danger: true },
+  { code: "MVH",  text: "My mic volume is too high",                 danger: true },
+  { code: "EP",   text: "There is echo",                             danger: true },
+  { code: "BSW",  text: "The screen on the balcony is not working",  danger: true },
+  { code: "SOS",  text: "SECURITY EMERGENCY..",                      danger: true },
 ];
+
+const TRANSLATOR_CODES = new Set(QUICK_PHRASES.map((q) => q.code));
+const isTranslatorText = (txt: string) => {
+  const m = txt.match(/^\[([A-Z]{2,4})\]\s/); // "[SOS] ..."
+  return !!(m && TRANSLATOR_CODES.has(m[1]));
+};
 
 // --- UI bits -----------------------------------------------------------
 const nowTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -98,10 +105,12 @@ type Toast = { id: string; kind: "sent" | "received"; text: string };
 function ToastHost({ toasts, onClose }: { toasts: Toast[]; onClose: (id: string) => void }) {
   return (
     <>
+      {/* Screen-reader live region */}
       <div className="sr-only" role="status" aria-live="polite">
         {toasts.length ? `Notification: ${toasts[toasts.length - 1].text}` : ""}
       </div>
 
+      {/* Visual toasts */}
       <div className="pointer-events-none fixed left-1/2 top-16 z-[60] -translate-x-1/2 space-y-2 px-4">
         {toasts.map((t) => {
           const color =
@@ -134,6 +143,7 @@ function ToastHost({ toasts, onClose }: { toasts: Toast[]; onClose: (id: string)
         })}
       </div>
 
+      {/* tiny keyframes */}
       <style jsx global>{`
         @keyframes toastIn {
           from { opacity: 0; transform: translate(-50%, -8px); }
@@ -149,13 +159,15 @@ function ToastHost({ toasts, onClose }: { toasts: Toast[]; onClose: (id: string)
 }
 
 // --- Page --------------------------------------------------------------
+type Msg = { id: string; at: string; from: "A" | "B"; text: string; senderId?: string; danger?: boolean };
+
 export default function SoundCommPanel() {
   // Network
   const socketRef = useRef<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [mySocketId, setMySocketId] = useState<string | null>(null);
 
-  // Sound element (autoplay safe)
+  // Sound (autoplay-safe)
   const soundRef = useRef<HTMLAudioElement | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -174,7 +186,9 @@ export default function SoundCommPanel() {
     try {
       soundRef.current.currentTime = 0;
       void soundRef.current.play()?.catch(() => {});
-    } catch {/* ignore */}
+    } catch {
+      /* ignore */
+    }
   };
   const enableSound = () => {
     setSoundEnabled(true);
@@ -182,7 +196,7 @@ export default function SoundCommPanel() {
     tryPlay();
   };
 
-  // Notifications permission
+  // Notification permission
   useEffect(() => {
     if (typeof window !== "undefined" && "Notification" in window && Notification.permission !== "granted") {
       Notification.requestPermission().catch(() => {});
@@ -202,7 +216,6 @@ export default function SoundCommPanel() {
     () => INSTRUMENTS.reduce((acc, it) => ((acc[it.key] = INITIAL_LEVEL), acc), {} as Record<string, number>)
   );
 
-  type Msg = { id: string; at: string; from: "A" | "B"; text: string; senderId?: string };
   const [log, setLog] = useState<Msg[]>([]);
 
   // Toasts
@@ -230,10 +243,11 @@ export default function SoundCommPanel() {
     const onLevels = (next: Record<string, number>) => setLevels(next || {});
 
     const onLog = (m: Msg) => {
-      // ✅ Skip our own echo (we already pushed it via pushLocal)
+      // Skip own echo (we already pushed locally on send)
       if (m.senderId && m.senderId === s.id) return;
 
-      setLog((l) => [{ ...m }, ...l].slice(0, 200));
+      const danger = isTranslatorText(m.text);
+      setLog((l) => [{ ...m, danger }, ...l].slice(0, 200));
 
       const opposite: "A" | "B" = role === "A" ? "B" : "A";
       if (m.from === opposite) {
@@ -259,10 +273,9 @@ export default function SoundCommPanel() {
     };
   }, [room, role, soundEnabled]);
 
-
   // Local push (no sound for sender)
-  const pushLocal = (from: "A" | "B", text: string) => {
-    setLog((l) => [{ id: crypto.randomUUID(), at: nowTime(), from, text, senderId: mySocketId || undefined }, ...l].slice(0, 200));
+  const pushLocal = (from: "A" | "B", text: string, danger = false) => {
+    setLog((l) => [{ id: crypto.randomUUID(), at: nowTime(), from, text, senderId: mySocketId || undefined, danger }, ...l].slice(0, 200));
     showToast("sent", text);
   };
 
@@ -270,20 +283,21 @@ export default function SoundCommPanel() {
   const emitARequest = (instrumentKey: string, kind: "VLK" | "VLH" | "SOUND_OK", labelForText?: string) => {
     const s = socketRef.current; if (!s) return;
     const suffix = commentA.trim() ? ` • ${commentA.trim()}` : "";
-    const text = kind === "SOUND_OK"
-      ? `Sound Perfect ✅${suffix}`
-      : `${labelForText} – ${kind === "VLK" ? "Volume Low" : "Volume High"} (${kind})${suffix}`;
-    pushLocal("A", text);
+    const text =
+      kind === "SOUND_OK"
+        ? `Sound Perfect ✅${suffix}`
+        : `${labelForText} – ${kind === "VLK" ? "Volume Low" : "Volume High"} (${kind})${suffix}`;
+    pushLocal("A", text, false);
     s.emit("a:request", { room, instrumentKey, action: kind, text });
     setCommentA("");
   };
 
-  /** Send a Quick Translator message from M → S */
+  /** Send a Quick Translator message from M → S (danger) */
   const emitAQuick = (code: string, phrase: string) => {
     const s = socketRef.current; if (!s) return;
     const suffix = commentA.trim() ? ` • ${commentA.trim()}` : "";
     const text = `[${code}] ${phrase}${suffix}`;
-    pushLocal("A", text);
+    pushLocal("A", text, true); // mark as danger locally
     s.emit("a:request", { room, instrumentKey: "", action: "QUICK", text });
     setCommentA("");
   };
@@ -294,7 +308,7 @@ export default function SoundCommPanel() {
     const suffix = commentB.trim() ? ` • ${commentB.trim()}` : "";
     const text = `${labelForText} – ${delta > 0 ? "Increase" : "Lower"} (${code})${suffix}`;
     s.emit("b:adjust", { room, instrumentKey, delta, text });
-    pushLocal("B", text);
+    pushLocal("B", text, false);
     setCommentB("");
   };
 
@@ -302,7 +316,7 @@ export default function SoundCommPanel() {
     const s = socketRef.current; if (!s) return;
     const suffix = commentB.trim() ? ` • ${commentB.trim()}` : "";
     const text = instrumentKey && labelForText ? `${labelForText} – Received ✅${suffix}` : `RECEIVED ✅${suffix}`;
-    pushLocal("B", text);
+    pushLocal("B", text, false);
     s.emit("b:ack", { room, instrumentKey, text });
     setCommentB("");
   };
@@ -334,7 +348,7 @@ export default function SoundCommPanel() {
       {/* Toasts overlay */}
       <ToastHost toasts={toasts} onClose={closeToast} />
 
-      {/* Top bar with church logo (sticky) */}
+      {/* Sticky header with logo */}
       <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-black/20 backdrop-blur-sm">
         <div className="mx-auto max-w-7xl px-6 py-3 flex items-center gap-3">
           <img src="/logo.png" alt="Church Logo" className="h-8 w-auto rounded-md" />
@@ -379,7 +393,7 @@ export default function SoundCommPanel() {
                 <span className="text-[11px]">{connected ? "Connected" : "Offline"}</span>
               </div>
 
-              {/* Enable sound (autoplay policy safe) */}
+              {/* Enable sound (autoplay policy) */}
               <button
                 type="button"
                 onClick={enableSound}
@@ -402,7 +416,7 @@ export default function SoundCommPanel() {
 
                 {/* Quick Translator */}
                 <div className="mt-4">
-                  <div className="text-xs uppercase tracking-wider text-white/70 mb-2">Quick Translator</div>
+                  <div className="text-xs uppercase tracking-wider text-white mb-2 font-bold">Quick Translator</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {QUICK_PHRASES.map((q) => (
                       <PillButton
@@ -469,19 +483,23 @@ export default function SoundCommPanel() {
                 <PillButton label="Reset Levels (all)" onClick={emitResetLevels} disabled={!connected || role !== "B"} />
               </div>
 
-
-              {/* Chat bubbles: M left (indigo), S right (emerald) */}
+              {/* Chat bubbles: M left (indigo), S right (emerald); translator = red */}
               <div className="mt-4 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-3 space-y-3">
                 {log.length === 0 ? (
                   <div className="text-white/70 text-base">No messages yet.</div>
                 ) : (
                   log.map((m) => {
                     const isLeft = m.from === "A"; // M left, S right
-                    const bubble =
-                      (isLeft
+                    const base =
+                      isLeft
                         ? "bg-indigo-500/20 border border-indigo-400/30 text-indigo-50"
-                        : "bg-emerald-500/20 border border-emerald-400/30 text-emerald-50") +
-                      " rounded-2xl px-3 py-2 shadow-sm max-w-[85%]";
+                        : "bg-emerald-500/20 border border-emerald-400/30 text-emerald-50";
+
+                    const bubble =
+                      (m.danger
+                        ? "bg-rose-600/25 border border-rose-400/50 text-rose-50 ring-1 ring-rose-400/30"
+                        : base) + " rounded-2xl px-3 py-2 shadow-sm max-w-[85%]";
+
                     return (
                       <div key={m.id} className={`w-full flex ${isLeft ? "justify-start" : "justify-end"}`}>
                         <div className={`flex items-start gap-2 ${isLeft ? "flex-row" : "flex-row-reverse"}`}>
@@ -494,6 +512,9 @@ export default function SoundCommPanel() {
                             {uiRoleLetter(m.from)}
                           </span>
                           <div className={bubble}>
+                            {m.danger && (
+                              <div className="text-[10px] uppercase tracking-widest mb-1 opacity-80">Translator</div>
+                            )}
                             <div className="text-[15px] md:text-base leading-snug">{m.text}</div>
                             <div className="text-[10px] opacity-70 mt-1">{m.at}</div>
                           </div>
