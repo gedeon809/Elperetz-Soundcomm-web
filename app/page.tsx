@@ -4,7 +4,7 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
 import { io, Socket } from "socket.io-client";
 
 // SoundComm – Musicians (M) ↔ Sound System (S)
-// UI shows M/S, socket protocol remains A/B for compatibility
+// UI shows M/S, socket protocol remains A/B under the hood
 
 // --- Config ------------------------------------------------------------
 const SOCKET_URL: string =
@@ -26,6 +26,18 @@ const INSTRUMENTS: {
   { key: "conga", label: "Conga Drum", aActions: ["VLK", "VLH"], hasBControls: true },
   { key: "monitor", label: "Monitor Speaker", aActions: ["VLK", "VLH"], hasBControls: true },
   { key: "songleader", label: "Song Leader", aActions: ["VLK", "VLH"], hasBControls: true },
+];
+
+/** Quick Translator (common M -> S messages) */
+const QUICK_PHRASES: { code: string; text: string; danger?: boolean }[] = [
+  { code: "MSBP", text: "Return speaker not positioned correctly" },
+  { code: "CHM", text: "I can’t hear myself on return speaker" },
+  { code: "CHP", text: "I can’t hear the preacher" },
+  { code: "MLV", text: "My mic volume is low" },
+  { code: "MVH", text: "My mic volume is too high" },
+  { code: "EP",  text: "There is echo" },
+  { code: "BSW", text: "The screen on the balcony is not working" },
+  { code: "SOS", text: "SECURITY EMERGENCY..", danger: true },
 ];
 
 // --- UI bits -----------------------------------------------------------
@@ -52,13 +64,15 @@ function PillButton({
   title?: string;
   onClick?: () => void;
   disabled?: boolean;
-  variant?: "ghost" | "primary";
+  variant?: "ghost" | "primary" | "danger";
 }) {
   const base =
     "group inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-medium active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition";
   const styles =
     variant === "primary"
       ? "border-emerald-400/50 bg-emerald-500/20 hover:bg-emerald-500/30"
+      : variant === "danger"
+      ? "border-rose-400/60 bg-rose-500/20 hover:bg-rose-500/30"
       : "border-white/15 bg-white/5 hover:bg-white/10 hover:border-white/25";
   return (
     <button type="button" title={title || label} onClick={onClick} disabled={disabled} className={`${base} ${styles}`}>
@@ -84,12 +98,10 @@ type Toast = { id: string; kind: "sent" | "received"; text: string };
 function ToastHost({ toasts, onClose }: { toasts: Toast[]; onClose: (id: string) => void }) {
   return (
     <>
-      {/* SR live region for accessibility */}
       <div className="sr-only" role="status" aria-live="polite">
         {toasts.length ? `Notification: ${toasts[toasts.length - 1].text}` : ""}
       </div>
 
-      {/* Visual toasts */}
       <div className="pointer-events-none fixed left-1/2 top-16 z-[60] -translate-x-1/2 space-y-2 px-4">
         {toasts.map((t) => {
           const color =
@@ -122,7 +134,6 @@ function ToastHost({ toasts, onClose }: { toasts: Toast[]; onClose: (id: string)
         })}
       </div>
 
-      {/* tiny keyframes */}
       <style jsx global>{`
         @keyframes toastIn {
           from { opacity: 0; transform: translate(-50%, -8px); }
@@ -144,15 +155,8 @@ export default function SoundCommPanel() {
   const [connected, setConnected] = useState(false);
   const [mySocketId, setMySocketId] = useState<string | null>(null);
 
-  // Sound element
+  // Sound element (autoplay safe)
   const soundRef = useRef<HTMLAudioElement | null>(null);
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      soundRef.current = new Audio("/notification.wav");
-    }
-  }, []);
-
-  // --- sound state (SSR-safe) ---
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -172,13 +176,11 @@ export default function SoundCommPanel() {
       void soundRef.current.play()?.catch(() => {});
     } catch {/* ignore */}
   };
-
   const enableSound = () => {
     setSoundEnabled(true);
     if (typeof window !== "undefined") localStorage.setItem("soundEnabled", "1");
     tryPlay();
   };
-
 
   // Notifications permission
   useEffect(() => {
@@ -203,15 +205,12 @@ export default function SoundCommPanel() {
   type Msg = { id: string; at: string; from: "A" | "B"; text: string; senderId?: string };
   const [log, setLog] = useState<Msg[]>([]);
 
-  /* Toast state + helpers */
+  // Toasts
   const [toasts, setToasts] = useState<Toast[]>([]);
   const showToast = (kind: Toast["kind"], text: string) => {
     const id = crypto.randomUUID();
     setToasts((t) => [...t, { id, kind, text }]);
-    // auto dismiss
-    window.setTimeout(() => {
-      setToasts((t) => t.filter((x) => x.id !== id));
-    }, 2400);
+    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2400);
   };
   const closeToast = (id: string) => setToasts((t) => t.filter((x) => x.id !== id));
 
@@ -229,8 +228,13 @@ export default function SoundCommPanel() {
     const onDisconnect = () => setConnected(false);
 
     const onLevels = (next: Record<string, number>) => setLevels(next || {});
+
     const onLog = (m: Msg) => {
+      // ✅ Skip our own echo (we already pushed it via pushLocal)
+      if (m.senderId && m.senderId === s.id) return;
+
       setLog((l) => [{ ...m }, ...l].slice(0, 200));
+
       const opposite: "A" | "B" = role === "A" ? "B" : "A";
       if (m.from === opposite) {
         showToast("received", m.text);
@@ -255,14 +259,14 @@ export default function SoundCommPanel() {
     };
   }, [room, role, soundEnabled]);
 
-  // Local push (no sound)
+
+  // Local push (no sound for sender)
   const pushLocal = (from: "A" | "B", text: string) => {
     setLog((l) => [{ id: crypto.randomUUID(), at: nowTime(), from, text, senderId: mySocketId || undefined }, ...l].slice(0, 200));
-    // toast for the sender
     showToast("sent", text);
   };
 
-  // Emitters
+  // Emitters ------------------------------------------------------------
   const emitARequest = (instrumentKey: string, kind: "VLK" | "VLH" | "SOUND_OK", labelForText?: string) => {
     const s = socketRef.current; if (!s) return;
     const suffix = commentA.trim() ? ` • ${commentA.trim()}` : "";
@@ -271,6 +275,16 @@ export default function SoundCommPanel() {
       : `${labelForText} – ${kind === "VLK" ? "Volume Low" : "Volume High"} (${kind})${suffix}`;
     pushLocal("A", text);
     s.emit("a:request", { room, instrumentKey, action: kind, text });
+    setCommentA("");
+  };
+
+  /** Send a Quick Translator message from M → S */
+  const emitAQuick = (code: string, phrase: string) => {
+    const s = socketRef.current; if (!s) return;
+    const suffix = commentA.trim() ? ` • ${commentA.trim()}` : "";
+    const text = `[${code}] ${phrase}${suffix}`;
+    pushLocal("A", text);
+    s.emit("a:request", { room, instrumentKey: "", action: "QUICK", text });
     setCommentA("");
   };
 
@@ -298,12 +312,14 @@ export default function SoundCommPanel() {
     s.emit("reset-levels", { room });
   };
 
+  // Legend (existing + quick translator codes)
   const legend = useMemo(
     () => [
       { code: "VLK", desc: "Volume Low (request)" },
       { code: "VLH", desc: "Volume High (request)" },
-      { code: "LV", desc: "Lower Volume (action)" },
-      { code: "IC", desc: "Increase Volume (action)" },
+      { code: "LV",  desc: "Lower Volume (action)" },
+      { code: "IC",  desc: "Increase Volume (action)" },
+      ...QUICK_PHRASES.map((q) => ({ code: q.code, desc: q.text })),
     ],
     []
   );
@@ -363,20 +379,16 @@ export default function SoundCommPanel() {
                 <span className="text-[11px]">{connected ? "Connected" : "Offline"}</span>
               </div>
 
-              {/* Enable sound (for autoplay policy) */}
+              {/* Enable sound (autoplay policy safe) */}
               <button
                 type="button"
                 onClick={enableSound}
-                // Only switch styles after mount to avoid SSR → CSR mismatch
                 className={`ml-2 text-xs rounded-full px-2 py-1 border ${
                   mounted && soundEnabled ? "border-emerald-400/40 bg-emerald-500/10" : "border-white/15 bg-white/5"
                 }`}
                 title={mounted && soundEnabled ? "Sound enabled" : "Enable notification sound"}
               >
-                {/* Keep text stable during SSR, then update after mount */}
-                <span suppressHydrationWarning>
-                  🔔 {mounted && soundEnabled ? "Sound ON" : "Enable sound"}
-                </span>
+                <span suppressHydrationWarning>🔔 {mounted && soundEnabled ? "Sound ON" : "Enable sound"}</span>
               </button>
             </div>
           </div>
@@ -388,7 +400,25 @@ export default function SoundCommPanel() {
                 <SectionTitle icon="🎤">Musicians (M) – Requests</SectionTitle>
                 <p className="text-white/70 text-sm mt-1">Send quick requests to the Sound System (S).</p>
 
-                <div className="mt-3">
+                {/* Quick Translator */}
+                <div className="mt-4">
+                  <div className="text-xs uppercase tracking-wider text-white/70 mb-2">Quick Translator</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {QUICK_PHRASES.map((q) => (
+                      <PillButton
+                        key={q.code}
+                        label={q.text}
+                        code={q.code}
+                        onClick={() => emitAQuick(q.code, q.text)}
+                        disabled={!connected || role !== "A"}
+                        variant={q.danger ? "danger" : "primary"}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Optional comment to append */}
+                <div className="mt-4">
                   <label className="text-xs text-white/70">Comment (optional)</label>
                   <textarea
                     value={commentA}
@@ -398,6 +428,7 @@ export default function SoundCommPanel() {
                   />
                 </div>
 
+                {/* Instrument-specific volume requests */}
                 <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {INSTRUMENTS.map((it) => (
                     <div key={it.key} className="rounded-2xl bg-white/5 border border-white/10 p-4">
@@ -416,6 +447,7 @@ export default function SoundCommPanel() {
                     </div>
                   ))}
 
+                  {/* Special: Sound Perfect */}
                   <div className="rounded-2xl bg-emerald-600/20 border border-emerald-400/30 p-4">
                     <div className="flex items-center justify-between">
                       <div className="font-semibold">Sound Perfect</div>
@@ -437,8 +469,8 @@ export default function SoundCommPanel() {
                 <PillButton label="Reset Levels (all)" onClick={emitResetLevels} disabled={!connected || role !== "B"} />
               </div>
 
-              {/* Legend */}
-              <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-white/80">
+              {/* Legend (includes translator codes) */}
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-white/80">
                 {legend.map((l) => (
                   <div key={l.code} className="flex items-center gap-2">
                     <Badge>{l.code}</Badge>
